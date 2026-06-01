@@ -1,0 +1,2 @@
+"""Dormitory management backend package."""
+
