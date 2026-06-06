@@ -6,7 +6,7 @@
 /** 用户角色 */
 export type Role = 'admin' | 'student' | ''
 /** 管理端标签页 ID */
-export type AdminTab = 'overview' | 'residence' | 'bills' | 'maintenance' | 'access'
+export type AdminTab = 'overview' | 'residence' | 'bills' | 'maintenance' | 'access' | 'accounts'
 
 // ========== 认证相关 ==========
 
@@ -59,6 +59,7 @@ export interface Student {
   phone: string | null       // 联系电话
   building_no: string | null // 楼栋（null 表示未分配）
   room_no: string | null     // 房间号
+  move_in_date: string | null // 入住日期
 }
 
 /** 水电账单 */
@@ -150,6 +151,12 @@ export interface AuditLog {
   created_at: string          // 创建时间
 }
 
+/** 登录账号与角色 */
+export interface Account {
+  account: string
+  role: 'admin' | 'student'
+}
+
 /** 学生端首页聚合数据 */
 export interface StudentHome {
   student: Student & { bed_total?: number; bed_used?: number; head_student_id?: string | null }
@@ -175,6 +182,9 @@ export interface RoomForm {
   head_student_id: string  // 宿舍长学号
 }
 
+/** 宿舍编辑表单 */
+export interface RoomEditForm extends RoomForm {}
+
 /** 新增学生表单 */
 export interface StudentForm {
   student_id: string   // 学号
@@ -185,6 +195,7 @@ export interface StudentForm {
   phone: string        // 电话
   building_no: string  // 楼栋
   room_no: string      // 房间
+  move_in_date: string // 入住日期
   password: string     // 初始密码
 }
 
@@ -193,6 +204,7 @@ export interface AssignForm {
   student_id: string   // 学号
   building_no: string  // 目标楼栋
   room_no: string      // 目标房间
+  move_in_date: string // 入住日期
 }
 
 /** 密码重置表单 */
@@ -256,4 +268,34 @@ export interface VisitorForm {
   phone: string             // 电话
   visit_student_id: string  // 被访学生学号
   remark: string            // 备注
+}
+
+/** 账号创建表单 */
+export interface AccountForm {
+  account: string
+  password: string
+  role: 'admin' | 'student'
+}
+
+/** 账号修改表单 */
+export interface AccountEditForm {
+  account: string
+  password: string
+  role: '' | 'admin' | 'student'
+}
+
+/** 统计查询条件 */
+export interface StatisticsFilters {
+  building_no: string
+  room_no: string
+  start_date: string
+  end_date: string
+}
+
+/** 账单查询条件 */
+export interface BillFilters {
+  building_no: string
+  room_no: string
+  bill_month: string
+  pay_status: string
 }

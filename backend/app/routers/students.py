@@ -3,17 +3,28 @@
 ===============================
 提供学生的增删改查、住宿分配和密码重置操作。
 """
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
 from ..api_utils import ensure_room_capacity, raise_db, student_summary, sync_bed_used
 from ..db import connection, fetch_all
-from ..schemas import PasswordReset, StudentCreate, StudentUpdate
+from ..schemas import PasswordReset, StudentBatchImport, StudentCreate, StudentUpdate
 from ..security import CurrentUser, hash_password, require_admin
 
 
 router = APIRouter(prefix="/students", tags=["students"])
+
+
+def _move_in_date(building_no: str | None, room_no: str | None, value: date | None) -> date | None:
+    """已分配宿舍时默认今天入住，退宿时清空入住日期。"""
+    return value or date.today() if building_no and room_no else None
+
+
+def _student_password(payload: StudentCreate) -> str:
+    """未指定初始密码时使用学号。"""
+    return payload.password or payload.student_id
 
 
 @router.get("")
@@ -54,6 +65,7 @@ def list_students(
                    s.Phone AS phone,
                    s.BuildingNo AS building_no,
                    s.RoomNo AS room_no,
+                   s.MoveInDate AS move_in_date,
                    d.HeadStudentId AS head_student_id
             FROM Student AS s
             LEFT JOIN Dormitory AS d
@@ -90,8 +102,8 @@ def create_student(
             # 插入学生记录
             cursor.execute(
                 """
-                INSERT INTO Student(StudentId, Name, Gender, Major, [Class], Phone, BuildingNo, RoomNo)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO Student(StudentId, Name, Gender, Major, [Class], Phone, BuildingNo, RoomNo, MoveInDate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload.student_id,
@@ -102,6 +114,7 @@ def create_student(
                     payload.phone,
                     payload.building_no,
                     payload.room_no,
+                    _move_in_date(payload.building_no, payload.room_no, payload.move_in_date),
                 ),
             )
             # 创建登录账号（若不存在）
@@ -110,10 +123,59 @@ def create_student(
                 IF NOT EXISTS (SELECT 1 FROM Admin WHERE AdminId = ?)
                 INSERT INTO Admin(AdminId, Password, Role) VALUES (?, ?, 'student')
                 """,
-                (payload.student_id, payload.student_id, hash_password(payload.password)),
+                (payload.student_id, payload.student_id, hash_password(_student_password(payload))),
             )
             sync_bed_used(cursor)
         return {"message": "学生已创建"}
+    except Exception as exc:
+        raise_db(exc)
+
+
+@router.post("/import")
+def import_students(
+    payload: StudentBatchImport,
+    current: CurrentUser = Depends(require_admin),
+) -> dict[str, Any]:
+    """批量导入学生，并为每名学生自动生成登录账号。"""
+    try:
+        with connection() as conn:
+            cursor = conn.cursor()
+            sync_bed_used(cursor)
+            for student in payload.students:
+                ensure_room_capacity(cursor, student.building_no, student.room_no)
+                cursor.execute(
+                    """
+                    INSERT INTO Student(StudentId, Name, Gender, Major, [Class], Phone, BuildingNo, RoomNo, MoveInDate)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        student.student_id,
+                        student.name,
+                        student.gender,
+                        student.major,
+                        student.class_name,
+                        student.phone,
+                        student.building_no,
+                        student.room_no,
+                        _move_in_date(student.building_no, student.room_no, student.move_in_date),
+                    ),
+                )
+                cursor.execute(
+                    """
+                    IF NOT EXISTS (SELECT 1 FROM Admin WHERE AdminId = ?)
+                    INSERT INTO Admin(AdminId, Password, Role) VALUES (?, ?, 'student')
+                    """,
+                    (student.student_id, student.student_id, hash_password(_student_password(student))),
+                )
+            sync_bed_used(cursor)
+            cursor.execute(
+                """
+                INSERT INTO AuditLog(OperatorId, ActionType, TargetId, Detail)
+                VALUES (?, N'学生导入', NULL, ?)
+                """,
+                (current.account, f"批量导入 {len(payload.students)} 名学生"),
+            )
+        return {"message": f"已导入 {len(payload.students)} 名学生", "created_count": len(payload.students)}
     except Exception as exc:
         raise_db(exc)
 
@@ -138,6 +200,11 @@ def update_student(
             target_room = data.get("room_no", current["room_no"])
             sync_bed_used(cursor)
             ensure_room_capacity(cursor, target_building, target_room, exclude_student_id=student_id)
+            room_changed = target_building != current["building_no"] or target_room != current["room_no"]
+            if room_changed or "move_in_date" in data:
+                data["move_in_date"] = _move_in_date(target_building, target_room, data.get("move_in_date"))
+            if room_changed:
+                cursor.execute("UPDATE Dormitory SET HeadStudentId = NULL WHERE HeadStudentId = ?", (student_id,))
 
             # 字段名映射
             field_map = {
@@ -148,6 +215,7 @@ def update_student(
                 "phone": "Phone",
                 "building_no": "BuildingNo",
                 "room_no": "RoomNo",
+                "move_in_date": "MoveInDate",
             }
             sets: list[str] = []
             params: list[Any] = []
@@ -173,7 +241,8 @@ def delete_student(
     try:
         with connection() as conn:
             cursor = conn.cursor()
-            # 先删 Admin 账号，再删 Student 记录
+            # 先解除宿舍长引用，再删登录账号和学生记录
+            cursor.execute("UPDATE Dormitory SET HeadStudentId = NULL WHERE HeadStudentId = ?", (student_id,))
             cursor.execute("DELETE FROM Admin WHERE AdminId = ? AND Role = 'student'", (student_id,))
             cursor.execute("DELETE FROM Student WHERE StudentId = ?", (student_id,))
             sync_bed_used(cursor)

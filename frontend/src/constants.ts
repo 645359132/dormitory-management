@@ -11,4 +11,5 @@ export const adminTabs: { id: AdminTab; label: string }[] = [
   { id: 'bills', label: '水电账单' },
   { id: 'maintenance', label: '维修卫生' },
   { id: 'access', label: '出入登记' },
+  { id: 'accounts', label: '账号权限' },
 ]

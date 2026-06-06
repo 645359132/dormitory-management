@@ -16,6 +16,22 @@ from ..security import CurrentUser, require_admin, require_user
 router = APIRouter(prefix="/dormitories", tags=["dormitories"])
 
 
+def _ensure_head_student(cursor: Any, head_student_id: str | None, building_no: str, room_no: str) -> None:
+    """宿舍长必须是当前宿舍的学生。"""
+    if not head_student_id:
+        return
+    cursor.execute(
+        """
+        SELECT 1
+        FROM Student
+        WHERE StudentId = ? AND BuildingNo = ? AND RoomNo = ?
+        """,
+        (head_student_id, building_no, room_no),
+    )
+    if cursor.fetchone() is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="宿舍长必须是本宿舍学生")
+
+
 @router.get("")
 def list_dormitories(
     vacant_only: bool = False,
@@ -55,7 +71,9 @@ def create_dormitory(
     """创建新宿舍房间。"""
     try:
         with connection() as conn:
-            conn.cursor().execute(
+            cursor = conn.cursor()
+            _ensure_head_student(cursor, payload.head_student_id, payload.building_no, payload.room_no)
+            cursor.execute(
                 """
                 INSERT INTO Dormitory(BuildingNo, RoomNo, BedTotal, HeadStudentId)
                 VALUES (?, ?, ?, ?)
@@ -104,6 +122,7 @@ def update_dormitory(
                 sets.append("BedTotal = ?")
                 params.append(payload.bed_total)
             if "head_student_id" in data:
+                _ensure_head_student(cursor, payload.head_student_id, building_no, room_no)
                 sets.append("HeadStudentId = ?")
                 params.append(payload.head_student_id)
 

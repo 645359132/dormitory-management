@@ -5,7 +5,7 @@
 """
 from fastapi import APIRouter
 
-from . import access, audit, auth, bills, dashboard, dormitories, health, maintenance, student_home, students
+from . import accounts, access, audit, auth, bills, dashboard, dormitories, health, maintenance, student_home, students
 
 
 # 创建顶层路由，所有 API 路径均以 /api 开头
@@ -15,6 +15,7 @@ router = APIRouter(prefix="/api")
 for module in (
     health,           # 健康检查
     auth,             # 登录认证
+    accounts,         # 账号与权限管理
     dashboard,        # 管理端数据看板
     dormitories,      # 宿舍管理
     students,         # 学生管理

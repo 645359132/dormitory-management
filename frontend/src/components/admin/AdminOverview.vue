@@ -3,13 +3,18 @@
   展示核心指标卡片 + 空余床位、水电收缴、卫生排名数据面板。
 -->
 <script setup lang="ts">
-import type { Overview, Statistics } from '../../types'
+import type { Overview, Statistics, StatisticsFilters } from '../../types'
 
 defineProps<{
+  filters: StatisticsFilters                       // 查询条件
   money: (value: number | undefined) => string  // 金额格式化函数
   occupancyRate: number                           // 入住率
   overview: Overview | null                       // 总览指标
   statistics: Statistics | null                   // 统计数据
+}>()
+
+defineEmits<{
+  refreshStats: []
 }>()
 </script>
 
@@ -35,8 +40,17 @@ defineProps<{
       </article>
     </div>
 
-    <!-- 数据面板三列布局 -->
-    <div class="content-grid three">
+    <form class="panel inline-form" @submit.prevent="$emit('refreshStats')">
+      <h2>统计查询</h2>
+      <input v-model="filters.building_no" placeholder="楼栋" />
+      <input v-model="filters.room_no" placeholder="房间" />
+      <input v-model="filters.start_date" type="date" />
+      <input v-model="filters.end_date" type="date" />
+      <button class="primary" type="submit">查询</button>
+    </form>
+
+    <!-- 查询统计结果 -->
+    <div class="content-grid two">
       <section class="panel">
         <h2>空余床位</h2>
         <table>
@@ -69,6 +83,19 @@ defineProps<{
             <tr v-for="row in statistics?.hygiene_ranking.slice(0, 6)" :key="`${row.building_no}-${row.room_no}`">
               <td>{{ row.building_no }} {{ row.room_no }}</td>
               <td>{{ row.average_score.toFixed(1) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>维修统计</h2>
+        <table>
+          <tbody>
+            <tr v-for="row in statistics?.repair_by_type" :key="row.repair_type">
+              <td>{{ row.repair_type }}</td>
+              <td>{{ row.repair_count }} 单</td>
+              <td>{{ money(row.total_fee) }}</td>
             </tr>
           </tbody>
         </table>

@@ -17,6 +17,7 @@ RepairStatus = Literal["待处理", "维修中", "已完成"]  # 维修单状态
 RepairType = Literal["水电", "木工", "门窗", "其他"]   # 维修类别
 PayStatus = Literal["未缴", "已缴"]                    # 缴费状态
 Gender = Literal["男", "女"]                           # 性别
+AccountRole = Literal["admin", "student"]              # 账号角色
 
 
 # ========== 认证相关 ==========
@@ -43,6 +44,21 @@ class DormitoryUpdate(BaseModel):
     head_student_id: str | None = Field(default=None, max_length=12)  # 宿舍长学号
 
 
+# ========== 账号与权限相关 ==========
+
+class AccountCreate(BaseModel):
+    """创建登录账号请求体。"""
+    account: str = Field(min_length=1, max_length=20)
+    password: str = Field(min_length=3, max_length=128)
+    role: AccountRole
+
+
+class AccountUpdate(BaseModel):
+    """更新登录账号请求体。"""
+    password: str | None = Field(default=None, min_length=3, max_length=128)
+    role: AccountRole | None = None
+
+
 # ========== 学生相关 ==========
 
 class StudentCreate(BaseModel):
@@ -55,7 +71,8 @@ class StudentCreate(BaseModel):
     phone: str | None = Field(default=None, max_length=11)    # 联系电话
     building_no: str | None = Field(default=None, max_length=10)  # 楼栋
     room_no: str | None = Field(default=None, max_length=10)      # 房间号
-    password: str = Field(default="123456", min_length=3, max_length=128)  # 登录密码
+    move_in_date: date | None = None                          # 入住日期
+    password: str | None = Field(default=None, min_length=3, max_length=128)  # 登录密码
 
     @field_validator("phone")
     @classmethod
@@ -75,6 +92,7 @@ class StudentUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=11)
     building_no: str | None = Field(default=None, max_length=10)
     room_no: str | None = Field(default=None, max_length=10)
+    move_in_date: date | None = None
 
     @field_validator("phone")
     @classmethod
@@ -88,6 +106,11 @@ class StudentUpdate(BaseModel):
 class PasswordReset(BaseModel):
     """密码重置请求体。"""
     password: str = Field(default="123456", min_length=3, max_length=128)  # 新密码
+
+
+class StudentBatchImport(BaseModel):
+    """批量导入学生请求体。"""
+    students: list[StudentCreate] = Field(min_length=1, max_length=500)
 
 
 # ========== 账单相关 ==========

@@ -3,10 +3,11 @@
   包含：录入账单表单、修改账单表单、账单列表。
 -->
 <script setup lang="ts">
-import type { Bill, BillEditForm, BillForm } from '../../types'
+import type { Bill, BillEditForm, BillFilters, BillForm } from '../../types'
 
 defineProps<{
   billEditForm: BillEditForm                       // 账单编辑表单
+  billFilters: BillFilters                         // 账单查询条件
   billForm: BillForm                               // 新增账单表单
   bills: Bill[]                                    // 账单列表
   money: (value: number | undefined) => string     // 金额格式化函数
@@ -17,6 +18,7 @@ defineEmits<{
   createBill: []                 // 生成账单
   deleteBill: [bill: Bill]       // 删除账单
   payBill: [bill: Bill]         // 销账
+  refreshBills: []              // 查询账单
   updateBill: []                 // 更新账单
 }>()
 </script>
@@ -48,6 +50,19 @@ defineEmits<{
         <button class="primary" type="submit">更新账单</button>
       </form>
     </div>
+
+    <form class="panel inline-form" @submit.prevent="$emit('refreshBills')">
+      <h2>账单查询 / 欠费名单</h2>
+      <input v-model="billFilters.building_no" placeholder="楼栋" />
+      <input v-model="billFilters.room_no" placeholder="房间" />
+      <input v-model="billFilters.bill_month" type="month" />
+      <select v-model="billFilters.pay_status">
+        <option value="">全部状态</option>
+        <option>未缴</option>
+        <option>已缴</option>
+      </select>
+      <button class="primary" type="submit">查询</button>
+    </form>
 
     <!-- 账单列表 -->
     <section class="panel table-panel">

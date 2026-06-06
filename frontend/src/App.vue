@@ -3,10 +3,11 @@
   负责：
   - 未登录时显示登录界面
   - 登录后显示侧边栏 + 工作区布局
-  - 管理员展示 5 个功能标签页，学生展示个人首页
+  - 管理员展示 6 个功能标签页，学生展示个人首页
 -->
 <script setup lang="ts">
 import { adminTabs } from './constants'
+import AccountsPanel from './components/admin/AccountsPanel.vue'
 import AccessPanel from './components/admin/AccessPanel.vue'
 import AdminOverview from './components/admin/AdminOverview.vue'
 import BillsPanel from './components/admin/BillsPanel.vue'
@@ -18,11 +19,15 @@ import { useDormitoryApp } from './composables/useDormitoryApp'
 
 // 从全局组合式函数中解构所有状态和方法
 const {
+  accountEditForm,
+  accountForm,
+  accounts,
   activeTab,
   auditLogs,
   auth,
   bills,
   billEditForm,
+  billFilters,
   billForm,
   dormitories,
   error,
@@ -39,9 +44,11 @@ const {
   repairForm,
   repairs,
   resetForm,
+  roomEditForm,
   roomForm,
   assignForm,
   statistics,
+  statisticsFilters,
   students,
   studentForm,
   studentHome,
@@ -49,6 +56,7 @@ const {
   visitorForm,
   visitors,
   assignStudent,
+  createAccount,
   createBill,
   createHygiene,
   createItem,
@@ -56,20 +64,28 @@ const {
   createRoom,
   createStudent,
   createVisitor,
+  deleteAccount,
   deleteBill,
   deleteRoom,
   deleteStudent,
+  fillAccountEdit,
+  fillRoomEdit,
   handleLogin,
+  importStudents,
   leaveVisitor,
   logout,
   money,
   payBill,
   refresh,
+  refreshBills,
+  refreshStatistics,
   resetPassword,
   returnItem,
   statusClass,
   updateBill,
   updateRepair,
+  updateAccount,
+  updateRoom,
 } = useDormitoryApp()
 </script>
 
@@ -132,10 +148,12 @@ const {
       <!-- 管理员端：按标签页切换面板 -->
       <AdminOverview
         v-if="auth.role === 'admin' && activeTab === 'overview'"
+        :filters="statisticsFilters"
         :money="money"
         :occupancy-rate="occupancyRate"
         :overview="overview"
         :statistics="statistics"
+        @refresh-stats="refreshStatistics"
       />
 
       <ResidencePanel
@@ -143,6 +161,7 @@ const {
         :assign-form="assignForm"
         :dormitories="dormitories"
         :reset-form="resetForm"
+        :room-edit-form="roomEditForm"
         :room-form="roomForm"
         :student-form="studentForm"
         :students="students"
@@ -151,12 +170,16 @@ const {
         @create-student="createStudent"
         @delete-room="deleteRoom"
         @delete-student="deleteStudent"
+        @fill-room-edit="fillRoomEdit"
+        @import-students="importStudents"
         @reset-password="resetPassword"
+        @update-room="updateRoom"
       />
 
       <BillsPanel
         v-if="auth.role === 'admin' && activeTab === 'bills'"
         :bill-edit-form="billEditForm"
+        :bill-filters="billFilters"
         :bill-form="billForm"
         :bills="bills"
         :money="money"
@@ -164,6 +187,7 @@ const {
         @create-bill="createBill"
         @delete-bill="deleteBill"
         @pay-bill="payBill"
+        @refresh-bills="refreshBills"
         @update-bill="updateBill"
       />
 
@@ -181,7 +205,6 @@ const {
 
       <AccessPanel
         v-if="auth.role === 'admin' && activeTab === 'access'"
-        :audit-logs="auditLogs"
         :item-form="itemForm"
         :items="items"
         :status-class="statusClass"
@@ -191,6 +214,18 @@ const {
         @create-visitor="createVisitor"
         @leave-visitor="leaveVisitor"
         @return-item="returnItem"
+      />
+
+      <AccountsPanel
+        v-if="auth.role === 'admin' && activeTab === 'accounts'"
+        :account-edit-form="accountEditForm"
+        :account-form="accountForm"
+        :accounts="accounts"
+        :audit-logs="auditLogs"
+        @create-account="createAccount"
+        @delete-account="deleteAccount"
+        @fill-account-edit="fillAccountEdit"
+        @update-account="updateAccount"
       />
 
       <!-- 学生端：个人首页 -->

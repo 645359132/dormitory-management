@@ -35,9 +35,14 @@ CREATE TABLE Student (
     Phone       CHAR(11)      NULL,
     BuildingNo  NVARCHAR(10)  NULL,
     RoomNo      NVARCHAR(10)  NULL,
+    MoveInDate  DATE          NULL,
     CONSTRAINT PK_Student PRIMARY KEY CLUSTERED (StudentId),
     CONSTRAINT CK_Student_Gender CHECK (Gender IN (N'男', N'女')),
     CONSTRAINT CK_Student_Phone CHECK (Phone IS NULL OR Phone LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
+    CONSTRAINT CK_Student_Accommodation CHECK (
+        (BuildingNo IS NULL AND RoomNo IS NULL AND MoveInDate IS NULL)
+        OR (BuildingNo IS NOT NULL AND RoomNo IS NOT NULL AND MoveInDate IS NOT NULL)
+    ),
     CONSTRAINT FK_Student_Dorm FOREIGN KEY (BuildingNo, RoomNo)
         REFERENCES Dormitory(BuildingNo, RoomNo)
         ON UPDATE CASCADE
@@ -189,6 +194,7 @@ SELECT s.StudentId,
        s.Phone,
        s.BuildingNo,
        s.RoomNo,
+       s.MoveInDate,
        d.BedTotal,
        d.BedUsed,
        d.HeadStudentId
@@ -253,11 +259,40 @@ BEGIN
     ) AS s
         ON s.BuildingNo = d.BuildingNo AND s.RoomNo = d.RoomNo;
 
+    UPDATE d
+    SET d.HeadStudentId = NULL
+    FROM Dormitory AS d
+    LEFT JOIN Student AS s
+        ON s.StudentId = d.HeadStudentId
+       AND s.BuildingNo = d.BuildingNo
+       AND s.RoomNo = d.RoomNo
+    WHERE d.HeadStudentId IS NOT NULL AND s.StudentId IS NULL;
+
     IF EXISTS (SELECT 1 FROM Dormitory WHERE BedUsed > BedTotal)
     BEGIN
         RAISERROR(N'已住人数超过床位总数，操作回滚', 16, 1);
         ROLLBACK TRANSACTION;
     END
+END;
+GO
+
+CREATE OR ALTER TRIGGER trg_Dormitory_HeadStudent
+ON Dormitory
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted AS i
+        LEFT JOIN Student AS s
+            ON s.StudentId = i.HeadStudentId
+           AND s.BuildingNo = i.BuildingNo
+           AND s.RoomNo = i.RoomNo
+        WHERE i.HeadStudentId IS NOT NULL AND s.StudentId IS NULL
+    )
+        THROW 50003, N'宿舍长必须是本宿舍学生', 1;
 END;
 GO
 
@@ -358,7 +393,9 @@ BEGIN
             THROW 50002, N'该房间已住满', 1;
 
         UPDATE Student
-        SET BuildingNo = @BuildingNo, RoomNo = @RoomNo
+        SET BuildingNo = @BuildingNo,
+            RoomNo = @RoomNo,
+            MoveInDate = CONVERT(DATE, GETDATE())
         WHERE StudentId = @StudentId;
 
         COMMIT TRANSACTION;
@@ -476,12 +513,12 @@ VALUES
     (N'十八楼北', N'502', 6);
 GO
 
-INSERT INTO Student(StudentId, Name, Gender, Major, [Class], Phone, BuildingNo, RoomNo)
+INSERT INTO Student(StudentId, Name, Gender, Major, [Class], Phone, BuildingNo, RoomNo, MoveInDate)
 VALUES
-    ('24050710', N'张三', N'男', N'软件工程', N'软工2401', '13800000001', N'八楼南', N'401'),
-    ('24050711', N'李四', N'男', N'软件工程', N'软工2401', '13800000002', N'八楼南', N'401'),
-    ('24050712', N'王五', N'女', N'计算机科学与技术', N'计科2402', '13800000003', N'十八楼北', N'501'),
-    ('24050713', N'赵六', N'女', N'计算机科学与技术', N'计科2402', '13800000004', N'十八楼北', N'501');
+    ('24050710', N'张三', N'男', N'软件工程', N'软工2401', '13800000001', N'八楼南', N'401', '2026-03-01'),
+    ('24050711', N'李四', N'男', N'软件工程', N'软工2401', '13800000002', N'八楼南', N'401', '2026-03-01'),
+    ('24050712', N'王五', N'女', N'计算机科学与技术', N'计科2402', '13800000003', N'十八楼北', N'501', '2026-03-02'),
+    ('24050713', N'赵六', N'女', N'计算机科学与技术', N'计科2402', '13800000004', N'十八楼北', N'501', '2026-03-02');
 GO
 
 UPDATE Dormitory SET HeadStudentId = '24050710' WHERE BuildingNo = N'八楼南' AND RoomNo = N'401';

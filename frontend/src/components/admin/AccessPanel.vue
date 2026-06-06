@@ -1,12 +1,11 @@
 <!--
   学生宿舍管理系统 - 出入登记管理面板
-  包含：物品登记表单、访客登记表单、物品记录列表、访客记录列表、审计日志。
+  包含：物品登记表单、访客登记表单、物品记录列表和访客记录列表。
 -->
 <script setup lang="ts">
-import type { AuditLog, ItemForm, ItemRecord, VisitorForm, VisitorRecord } from '../../types'
+import type { ItemForm, ItemRecord, VisitorForm, VisitorRecord } from '../../types'
 
 defineProps<{
-  auditLogs: AuditLog[]                             // 审计日志列表
   itemForm: ItemForm                                // 物品登记表单
   items: ItemRecord[]                               // 物品记录列表
   statusClass: (value: string) => string            // 状态 CSS 类名函数
@@ -82,19 +81,5 @@ defineEmits<{
       </section>
     </div>
 
-    <!-- 审计日志 -->
-    <section class="panel table-panel">
-      <h2>审计日志</h2>
-      <table>
-        <tbody>
-          <tr v-for="log in auditLogs" :key="log.log_id">
-            <td>{{ log.created_at }}</td>
-            <td>{{ log.operator_id || '-' }}</td>
-            <td>{{ log.action_type }}</td>
-            <td>{{ log.detail || log.target_id }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
   </section>
 </template>

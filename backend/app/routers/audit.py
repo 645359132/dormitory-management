@@ -1,7 +1,7 @@
 """
-学生宿舍管理系统 - 审计日志接口（独立路由）
-=============================================
-提供审计日志查询端点（与 access.py 中的端点功能相同）。
+学生宿舍管理系统 - 审计日志接口
+===============================
+提供关键操作日志查询端点。
 """
 from typing import Any
 
@@ -17,7 +17,7 @@ router = APIRouter(tags=["audit"])
 
 @router.get("/audit-logs")
 def list_audit_logs(_: CurrentUser = Depends(require_admin)) -> list[dict[str, Any]]:
-    """查询最近 100 条审计日志（独立路由版本）。"""
+    """查询最近 100 条审计日志。"""
     try:
         return fetch_all(
             """

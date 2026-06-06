@@ -109,7 +109,7 @@ def ensure_room_capacity(
 def student_summary(cursor: Any, student_id: str) -> dict[str, Any]:
     """获取学生基础信息及所属宿舍详情。
 
-    返回值包含：学号、姓名、性别、专业、班级、电话、楼栋、房间号、床位总数、已用床位数、宿舍长学号。
+    返回值包含：学号、姓名、性别、专业、班级、电话、楼栋、房间号、入住日期、床位总数、已用床位数、宿舍长学号。
     若学生不存在则抛出 404。
     """
     cursor.execute(
@@ -122,6 +122,7 @@ def student_summary(cursor: Any, student_id: str) -> dict[str, Any]:
                s.Phone AS phone,
                s.BuildingNo AS building_no,
                s.RoomNo AS room_no,
+               s.MoveInDate AS move_in_date,
                d.BedTotal AS bed_total,
                d.BedUsed AS bed_used,
                d.HeadStudentId AS head_student_id

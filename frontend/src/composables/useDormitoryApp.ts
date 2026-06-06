@@ -5,11 +5,15 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { apiRequest } from '../api'
 import type {
+  Account,
+  AccountEditForm,
+  AccountForm,
   AdminTab,
   AuditLog,
   AuthState,
   Bill,
   BillEditForm,
+  BillFilters,
   BillForm,
   Dormitory,
   Hygiene,
@@ -23,8 +27,10 @@ import type {
   RepairEditForm,
   RepairForm,
   ResetForm,
+  RoomEditForm,
   RoomForm,
   Statistics,
+  StatisticsFilters,
   Student,
   StudentForm,
   StudentHome,
@@ -66,11 +72,13 @@ export function useDormitoryApp() {
   const items = ref<ItemRecord[]>([])               // 物品记录列表
   const visitors = ref<VisitorRecord[]>([])         // 访客记录列表
   const auditLogs = ref<AuditLog[]>([])             // 审计日志列表
+  const accounts = ref<Account[]>([])               // 登录账号列表
   const studentHome = ref<StudentHome | null>(null) // 学生端首页数据
 
   // ========== 表单数据（双向绑定） ==========
 
-  const roomForm = reactive<RoomForm>({ building_no: '北苑1栋', room_no: '', bed_total: 4, head_student_id: '' })
+  const roomForm = reactive<RoomForm>({ building_no: '八楼南', room_no: '', bed_total: 4, head_student_id: '' })
+  const roomEditForm = reactive<RoomEditForm>({ building_no: '', room_no: '', bed_total: 4, head_student_id: '' })
   const studentForm = reactive<StudentForm>({
     student_id: '',
     name: '',
@@ -80,9 +88,10 @@ export function useDormitoryApp() {
     phone: '',
     building_no: '',
     room_no: '',
-    password: '123456',
+    move_in_date: '',
+    password: '',
   })
-  const assignForm = reactive<AssignForm>({ student_id: '', building_no: '', room_no: '' })
+  const assignForm = reactive<AssignForm>({ student_id: '', building_no: '', room_no: '', move_in_date: '' })
   const resetForm = reactive<ResetForm>({ student_id: '', password: '123456' })
   const billForm = reactive<BillForm>({ building_no: '', room_no: '', bill_month: '2026-06', water_fee: 0, electric_fee: 0 })
   const billEditForm = reactive<BillEditForm>({ bill_id: '', water_fee: '', electric_fee: '', pay_status: '' })
@@ -91,6 +100,10 @@ export function useDormitoryApp() {
   const hygieneForm = reactive<HygieneForm>({ building_no: '', room_no: '', score: 90, check_date: '' })
   const itemForm = reactive<ItemForm>({ student_id: '', item_name: '', action: '存入', quantity: 1, remark: '' })
   const visitorForm = reactive<VisitorForm>({ visitor_name: '', phone: '', visit_student_id: '', remark: '' })
+  const accountForm = reactive<AccountForm>({ account: '', password: '', role: 'admin' })
+  const accountEditForm = reactive<AccountEditForm>({ account: '', password: '', role: '' })
+  const statisticsFilters = reactive<StatisticsFilters>({ building_no: '', room_no: '', start_date: '', end_date: '' })
+  const billFilters = reactive<BillFilters>({ building_no: '', room_no: '', bill_month: '', pay_status: '' })
 
   // ========== 计算属性 ==========
 
@@ -127,6 +140,62 @@ export function useDormitoryApp() {
   /** 发起带令牌的 API 请求 */
   async function request<T>(path: string, options: RequestInit = {}) {
     return apiRequest<T>(path, auth.token, options)
+  }
+
+  /** 根据非空查询条件生成 API 地址 */
+  function queryPath(path: string, values: object) {
+    const params = new URLSearchParams()
+    Object.entries(values as Record<string, string>).forEach(([key, value]) => {
+      if (value.trim()) params.set(key, value.trim())
+    })
+    const query = params.toString()
+    return query ? `${path}?${query}` : path
+  }
+
+  function statisticsPath() {
+    return queryPath('/api/statistics', statisticsFilters)
+  }
+
+  function billsPath() {
+    return queryPath('/api/bills', billFilters)
+  }
+
+  /** 将 CSV 学生名单解析为批量导入请求数据 */
+  async function parseStudentCsv(file: File) {
+    const rows = (await file.text())
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => line.split(/[\t,，]/).map((value) => value.trim().replace(/^"|"$/g, '')))
+
+    const aliases: Record<string, string> = {
+      学号: 'student_id',
+      姓名: 'name',
+      性别: 'gender',
+      专业: 'major',
+      班级: 'class_name',
+      电话: 'phone',
+      联系电话: 'phone',
+      楼栋: 'building_no',
+      楼宇号: 'building_no',
+      房间: 'room_no',
+      房间号: 'room_no',
+      入住日期: 'move_in_date',
+      初始密码: 'password',
+    }
+    const fallback = ['student_id', 'name', 'gender', 'major', 'class_name', 'phone', 'building_no', 'room_no', 'move_in_date', 'password']
+    const first = rows[0] ?? []
+    const hasHeader = first.some((value) => Boolean(aliases[value]) || fallback.includes(value))
+    const headers = (hasHeader ? first : fallback).map((value) => aliases[value] ?? value)
+    const dataRows = hasHeader ? rows.slice(1) : rows
+
+    return dataRows.map((values) => {
+      const student: Record<string, string | null> = {}
+      headers.forEach((header, index) => {
+        student[header] = values[index]?.trim() || null
+      })
+      return student
+    })
   }
 
   /** 统一包装异步操作：自动管理 loading/error/notice 状态 */
@@ -187,18 +256,19 @@ export function useDormitoryApp() {
 
   /** 加载管理员端全部数据（并行请求） */
   async function loadAdminData() {
-    const [overviewData, statisticsData, roomData, studentData, billData, repairData, hygieneData, itemData, visitorData, logData] =
+    const [overviewData, statisticsData, roomData, studentData, billData, repairData, hygieneData, itemData, visitorData, logData, accountData] =
       await Promise.all([
         request<Overview>('/api/overview'),
-        request<Statistics>('/api/statistics'),
+        request<Statistics>(statisticsPath()),
         request<Dormitory[]>('/api/dormitories'),
         request<Student[]>('/api/students'),
-        request<Bill[]>('/api/bills'),
+        request<Bill[]>(billsPath()),
         request<Repair[]>('/api/repairs'),
         request<Hygiene[]>('/api/hygiene'),
         request<ItemRecord[]>('/api/access/items'),
         request<VisitorRecord[]>('/api/access/visitors'),
         request<AuditLog[]>('/api/audit-logs'),
+        request<Account[]>('/api/accounts'),
       ])
     overview.value = overviewData
     statistics.value = statisticsData
@@ -210,6 +280,7 @@ export function useDormitoryApp() {
     items.value = itemData
     visitors.value = visitorData
     auditLogs.value = logData
+    accounts.value = accountData
   }
 
   /** 加载学生端首页数据 */
@@ -220,6 +291,20 @@ export function useDormitoryApp() {
   /** 刷新当前视图数据 */
   async function refresh() {
     await run(loadCurrent)
+  }
+
+  /** 仅刷新统计查询结果 */
+  async function refreshStatistics() {
+    await run(async () => {
+      statistics.value = await request<Statistics>(statisticsPath())
+    })
+  }
+
+  /** 仅刷新账单查询结果 */
+  async function refreshBills() {
+    await run(async () => {
+      bills.value = await request<Bill[]>(billsPath())
+    })
   }
 
   // ========== 宿舍管理 ==========
@@ -233,6 +318,29 @@ export function useDormitoryApp() {
       })
       notice.value = '宿舍已创建'
       roomForm.room_no = ''
+      await loadAdminData()
+    })
+  }
+
+  /** 将宿舍信息填入修改表单 */
+  function fillRoomEdit(room: Dormitory) {
+    roomEditForm.building_no = room.building_no
+    roomEditForm.room_no = room.room_no
+    roomEditForm.bed_total = room.bed_total
+    roomEditForm.head_student_id = room.head_student_id ?? ''
+  }
+
+  /** 修改宿舍床位数或宿舍长 */
+  async function updateRoom() {
+    await run(async () => {
+      await request(`/api/dormitories/${encodeURIComponent(roomEditForm.building_no)}/${encodeURIComponent(roomEditForm.room_no)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          bed_total: roomEditForm.bed_total,
+          head_student_id: optional(roomEditForm.head_student_id),
+        }),
+      })
+      notice.value = '宿舍已更新'
       await loadAdminData()
     })
   }
@@ -262,12 +370,29 @@ export function useDormitoryApp() {
           phone: optional(studentForm.phone),
           building_no: optional(studentForm.building_no),
           room_no: optional(studentForm.room_no),
+          move_in_date: optional(studentForm.move_in_date),
+          password: optional(studentForm.password) ?? studentForm.student_id,
         }),
       })
       notice.value = '学生已创建'
       studentForm.student_id = ''
       studentForm.name = ''
       studentForm.phone = ''
+      studentForm.move_in_date = ''
+      studentForm.password = ''
+      await loadAdminData()
+    })
+  }
+
+  /** 从 CSV 文件批量导入学生 */
+  async function importStudents(file: File) {
+    await run(async () => {
+      const studentsToImport = await parseStudentCsv(file)
+      await request('/api/students/import', {
+        method: 'POST',
+        body: JSON.stringify({ students: studentsToImport }),
+      })
+      notice.value = `已导入 ${studentsToImport.length} 名学生`
       await loadAdminData()
     })
   }
@@ -280,6 +405,7 @@ export function useDormitoryApp() {
         body: JSON.stringify({
           building_no: clear ? null : optional(assignForm.building_no),
           room_no: clear ? null : optional(assignForm.room_no),
+          move_in_date: clear ? null : optional(assignForm.move_in_date),
         }),
       })
       notice.value = clear ? '已办理退宿' : '住宿已调整'
@@ -304,6 +430,54 @@ export function useDormitoryApp() {
         body: JSON.stringify({ password: resetForm.password }),
       })
       notice.value = '密码已重置'
+      await loadAdminData()
+    })
+  }
+
+  // ========== 账号与权限管理 ==========
+
+  /** 创建登录账号 */
+  async function createAccount() {
+    await run(async () => {
+      await request('/api/accounts', {
+        method: 'POST',
+        body: JSON.stringify(accountForm),
+      })
+      notice.value = '账号已创建'
+      accountForm.account = ''
+      accountForm.password = ''
+      await loadAdminData()
+    })
+  }
+
+  /** 将账号信息填入修改表单 */
+  function fillAccountEdit(item: Account) {
+    accountEditForm.account = item.account
+    accountEditForm.password = ''
+    accountEditForm.role = item.role
+  }
+
+  /** 修改账号密码或角色 */
+  async function updateAccount() {
+    await run(async () => {
+      const body: Record<string, unknown> = {}
+      if (accountEditForm.password) body.password = accountEditForm.password
+      if (accountEditForm.role) body.role = accountEditForm.role
+      await request(`/api/accounts/${encodeURIComponent(accountEditForm.account)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      })
+      notice.value = '账号已更新'
+      accountEditForm.password = ''
+      await loadAdminData()
+    })
+  }
+
+  /** 删除登录账号 */
+  async function deleteAccount(item: Account) {
+    await run(async () => {
+      await request(`/api/accounts/${encodeURIComponent(item.account)}`, { method: 'DELETE' })
+      notice.value = '账号已删除'
       await loadAdminData()
     })
   }
@@ -474,11 +648,15 @@ export function useDormitoryApp() {
 
   return {
     // 状态
+    accountEditForm,
+    accountForm,
+    accounts,
     activeTab,
     auditLogs,
     auth,
     bills,
     billEditForm,
+    billFilters,
     billForm,
     dormitories,
     error,
@@ -495,9 +673,11 @@ export function useDormitoryApp() {
     repairForm,
     repairs,
     resetForm,
+    roomEditForm,
     roomForm,
     assignForm,
     statistics,
+    statisticsFilters,
     students,
     studentForm,
     studentHome,
@@ -506,6 +686,7 @@ export function useDormitoryApp() {
     visitors,
     // 方法
     assignStudent,
+    createAccount,
     createBill,
     createHygiene,
     createItem,
@@ -513,19 +694,27 @@ export function useDormitoryApp() {
     createRoom,
     createStudent,
     createVisitor,
+    deleteAccount,
     deleteBill,
     deleteRoom,
     deleteStudent,
+    fillAccountEdit,
+    fillRoomEdit,
     handleLogin,
+    importStudents,
     leaveVisitor,
     logout,
     money,
     payBill,
     refresh,
+    refreshBills,
+    refreshStatistics,
     resetPassword,
     returnItem,
     statusClass,
     updateBill,
     updateRepair,
+    updateAccount,
+    updateRoom,
   }
 }

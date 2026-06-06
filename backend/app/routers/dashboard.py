@@ -3,9 +3,10 @@
 ===================================
 提供管理员首页的总览数据和统计图表数据。
 """
+from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ..api_utils import raise_db
 from ..db import fetch_all, fetch_one
@@ -41,7 +42,13 @@ def overview(_: CurrentUser = Depends(require_admin)) -> dict[str, Any]:
 
 
 @router.get("/statistics")
-def statistics(_: CurrentUser = Depends(require_admin)) -> dict[str, Any]:
+def statistics(
+    building_no: str | None = None,
+    room_no: str | None = None,
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    _: CurrentUser = Depends(require_admin),
+) -> dict[str, Any]:
     """获取管理端统计数据，包括四个维度的数据。
 
     返回包含：
@@ -51,51 +58,95 @@ def statistics(_: CurrentUser = Depends(require_admin)) -> dict[str, Any]:
     - bill_collection: 各月份账单收缴情况
     """
     try:
+        if start_date and end_date and start_date > end_date:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="开始日期不能晚于结束日期")
+
+        room_conditions = ["1 = 1"]
+        room_params: list[Any] = []
+        repair_conditions = ["1 = 1"]
+        repair_params: list[Any] = []
+        hygiene_conditions = ["1 = 1"]
+        hygiene_params: list[Any] = []
+        bill_conditions = ["1 = 1"]
+        bill_params: list[Any] = []
+
+        for column, value in (("BuildingNo", building_no), ("RoomNo", room_no)):
+            if value:
+                room_conditions.append(f"{column} = ?")
+                room_params.append(value)
+                repair_conditions.append(f"{column} = ?")
+                repair_params.append(value)
+                hygiene_conditions.append(f"{column} = ?")
+                hygiene_params.append(value)
+                bill_conditions.append(f"{column} = ?")
+                bill_params.append(value)
+        if start_date:
+            repair_conditions.append("SubmitTime >= ?")
+            repair_params.append(start_date)
+            hygiene_conditions.append("CheckDate >= ?")
+            hygiene_params.append(start_date)
+            bill_conditions.append("BillMonth >= ?")
+            bill_params.append(start_date.strftime("%Y-%m"))
+        if end_date:
+            repair_conditions.append("SubmitTime < DATEADD(day, 1, ?)")
+            repair_params.append(end_date)
+            hygiene_conditions.append("CheckDate <= ?")
+            hygiene_params.append(end_date)
+            bill_conditions.append("BillMonth <= ?")
+            bill_params.append(end_date.strftime("%Y-%m"))
+
         return {
             "vacancies": fetch_all(
-                """
+                f"""
                 SELECT BuildingNo AS building_no,
                        RoomNo AS room_no,
                        BedTotal AS bed_total,
                        BedUsed AS bed_used,
                        BedTotal - BedUsed AS vacant_beds
                 FROM Dormitory
-                WHERE BedUsed < BedTotal
+                WHERE BedUsed < BedTotal AND {' AND '.join(room_conditions)}
                 ORDER BY vacant_beds DESC, BuildingNo, RoomNo
-                """
+                """,
+                tuple(room_params),
             ),
             "repair_by_type": fetch_all(
-                """
+                f"""
                 SELECT RepairType AS repair_type,
                        COUNT(*) AS repair_count,
                        ISNULL(SUM(Fee), 0) AS total_fee
                 FROM RepairRecord
+                WHERE {' AND '.join(repair_conditions)}
                 GROUP BY RepairType
                 ORDER BY repair_count DESC
-                """
+                """,
+                tuple(repair_params),
             ),
             "hygiene_ranking": fetch_all(
-                """
+                f"""
                 SELECT TOP 20 BuildingNo AS building_no,
                               RoomNo AS room_no,
                               AVG(CAST(Score AS FLOAT)) AS average_score,
                               COUNT(*) AS check_count,
                               MAX(CheckDate) AS last_check_date
                 FROM HygieneRecord
+                WHERE {' AND '.join(hygiene_conditions)}
                 GROUP BY BuildingNo, RoomNo
                 ORDER BY average_score DESC
-                """
+                """,
+                tuple(hygiene_params),
             ),
             "bill_collection": fetch_all(
-                """
+                f"""
                 SELECT BillMonth AS bill_month,
                        COUNT(*) AS bill_count,
                        SUM(CASE WHEN PayStatus = N'已缴' THEN 1 ELSE 0 END) AS paid_count,
                        ISNULL(SUM(TotalAmount), 0) AS total_amount
                 FROM UtilityBill
+                WHERE {' AND '.join(bill_conditions)}
                 GROUP BY BillMonth
                 ORDER BY BillMonth DESC
-                """
+                """,
+                tuple(bill_params),
             ),
         }
     except Exception as exc:
