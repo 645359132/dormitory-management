@@ -1,8 +1,8 @@
-/**
+﻿/**
  * 学生宿舍管理系统 - 全局状态管理与业务逻辑模块
  * 提供所有响应式状态、表单数据和 API 操作方法，作为整个前端应用的核心逻辑层。
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { apiRequest } from '../api'
 import type {
   Account,
@@ -23,6 +23,7 @@ import type {
   LoginForm,
   LoginResponse,
   Overview,
+  PageResult,
   Repair,
   RepairEditForm,
   RepairForm,
@@ -34,6 +35,7 @@ import type {
   Student,
   StudentForm,
   StudentHome,
+  StudentQuery,
   VisitorForm,
   VisitorRecord,
   AssignForm,
@@ -66,6 +68,8 @@ export function useDormitoryApp() {
   const statistics = ref<Statistics | null>(null)   // 管理端统计数据
   const dormitories = ref<Dormitory[]>([])          // 宿舍列表
   const students = ref<Student[]>([])               // 学生列表
+  const studentTotal = ref(0)                       // 学生查询结果总数
+  const studentQueryExecuted = ref(false)           // 是否主动执行过学生查询
   const bills = ref<Bill[]>([])                     // 账单列表
   const repairs = ref<Repair[]>([])                 // 报修列表
   const hygiene = ref<Hygiene[]>([])                // 卫生评分列表
@@ -104,6 +108,7 @@ export function useDormitoryApp() {
   const accountEditForm = reactive<AccountEditForm>({ account: '', password: '', role: '' })
   const statisticsFilters = reactive<StatisticsFilters>({ building_no: '', room_no: '', start_date: '', end_date: '' })
   const billFilters = reactive<BillFilters>({ building_no: '', room_no: '', bill_month: '', pay_status: '' })
+  const studentQuery = reactive<StudentQuery>({ q: '', building_no: '', residence_status: '', page: 1, page_size: 10 })
 
   // ========== 计算属性 ==========
 
@@ -114,7 +119,7 @@ export function useDormitoryApp() {
   })
 
   /** 学生端未缴账单数量 */
-  const studentUnpaidCount = computed(() => studentHome.value?.bills.filter((bill) => bill.pay_status === '未缴').length ?? 0)
+  const studentUnpaidCount = computed(() => studentHome.value?.bills?.filter((bill) => bill.pay_status === '未缴').length ?? 0)
 
   // ========== 工具函数 ==========
 
@@ -145,8 +150,8 @@ export function useDormitoryApp() {
   /** 根据非空查询条件生成 API 地址 */
   function queryPath(path: string, values: object) {
     const params = new URLSearchParams()
-    Object.entries(values as Record<string, string>).forEach(([key, value]) => {
-      if (value.trim()) params.set(key, value.trim())
+    Object.entries(values as Record<string, string | number>).forEach(([key, value]) => {
+      if (String(value).trim()) params.set(key, String(value).trim())
     })
     const query = params.toString()
     return query ? `${path}?${query}` : path
@@ -158,6 +163,10 @@ export function useDormitoryApp() {
 
   function billsPath() {
     return queryPath('/api/bills', billFilters)
+  }
+
+  function studentsPath() {
+    return queryPath('/api/students', studentQuery)
   }
 
   /** 将 CSV 学生名单解析为批量导入请求数据 */
@@ -241,6 +250,9 @@ export function useDormitoryApp() {
     localStorage.removeItem('role')
     localStorage.removeItem('account')
     studentHome.value = null
+    students.value = []
+    studentTotal.value = 0
+    studentQueryExecuted.value = false
   }
 
   // ========== 数据加载 ==========
@@ -248,39 +260,74 @@ export function useDormitoryApp() {
   /** 根据当前角色加载对应的首页数据 */
   async function loadCurrent() {
     if (auth.role === 'admin') {
-      await loadAdminData()
+      await loadAdminContext()
     } else if (auth.role === 'student') {
       await loadStudentHome()
     }
   }
 
-  /** 加载管理员端全部数据（并行请求） */
-  async function loadAdminData() {
-    const [overviewData, statisticsData, roomData, studentData, billData, repairData, hygieneData, itemData, visitorData, logData, accountData] =
-      await Promise.all([
-        request<Overview>('/api/overview'),
-        request<Statistics>(statisticsPath()),
-        request<Dormitory[]>('/api/dormitories'),
-        request<Student[]>('/api/students'),
-        request<Bill[]>(billsPath()),
+  async function loadOverviewMetrics() {
+    overview.value = await request<Overview>('/api/overview')
+  }
+
+  /** 总览默认只加载汇总指标；统计报表由管理员展开后再查询。 */
+  async function loadAdminOverview() {
+    await loadOverviewMetrics()
+  }
+
+  /** 学生名单由 SQL Server 执行筛选和分页，前端仅保存当前页。 */
+  async function refreshStudents() {
+    const result = await request<PageResult<Student>>(studentsPath())
+    students.value = result.items
+    studentTotal.value = result.total
+    studentQuery.page = result.page
+    studentQueryExecuted.value = true
+  }
+
+  /** 切换到具体模块后才加载该模块需要的数据。 */
+  async function loadAdminTab(tab: AdminTab) {
+    if (tab === 'overview') {
+      await loadAdminOverview()
+    } else if (tab === 'residence') {
+      dormitories.value = await request<Dormitory[]>('/api/dormitories')
+      if (studentQueryExecuted.value) await refreshStudents()
+    } else if (tab === 'bills') {
+      const [billData, roomData] = await Promise.all([request<Bill[]>(billsPath()), request<Dormitory[]>('/api/dormitories')])
+      bills.value = billData
+      dormitories.value = roomData
+    } else if (tab === 'maintenance') {
+      const [repairData, hygieneData, roomData] = await Promise.all([
         request<Repair[]>('/api/repairs'),
         request<Hygiene[]>('/api/hygiene'),
+        request<Dormitory[]>('/api/dormitories'),
+      ])
+      repairs.value = repairData
+      hygiene.value = hygieneData
+      dormitories.value = roomData
+    } else if (tab === 'access') {
+      const [itemData, visitorData] = await Promise.all([
         request<ItemRecord[]>('/api/access/items'),
         request<VisitorRecord[]>('/api/access/visitors'),
+      ])
+      items.value = itemData
+      visitors.value = visitorData
+    } else if (tab === 'accounts') {
+      const [logData, accountData] = await Promise.all([
         request<AuditLog[]>('/api/audit-logs'),
         request<Account[]>('/api/accounts'),
       ])
-    overview.value = overviewData
-    statistics.value = statisticsData
-    dormitories.value = roomData
-    students.value = studentData
-    bills.value = billData
-    repairs.value = repairData
-    hygiene.value = hygieneData
-    items.value = itemData
-    visitors.value = visitorData
-    auditLogs.value = logData
-    accounts.value = accountData
+      auditLogs.value = logData
+      accounts.value = accountData
+    }
+  }
+
+  /** 刷新总览和当前模块，不请求其他无关业务数据。 */
+  async function loadAdminContext() {
+    if (activeTab.value === 'overview') {
+      await loadAdminOverview()
+      return
+    }
+    await Promise.all([loadOverviewMetrics(), loadAdminTab(activeTab.value)])
   }
 
   /** 加载学生端首页数据 */
@@ -298,6 +345,10 @@ export function useDormitoryApp() {
     await run(async () => {
       statistics.value = await request<Statistics>(statisticsPath())
     })
+  }
+
+  async function searchStudents() {
+    await run(refreshStudents)
   }
 
   /** 仅刷新账单查询结果 */
@@ -318,7 +369,7 @@ export function useDormitoryApp() {
       })
       notice.value = '宿舍已创建'
       roomForm.room_no = ''
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -341,7 +392,7 @@ export function useDormitoryApp() {
         }),
       })
       notice.value = '宿舍已更新'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -352,7 +403,7 @@ export function useDormitoryApp() {
         method: 'DELETE',
       })
       notice.value = '宿舍已删除'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -380,7 +431,7 @@ export function useDormitoryApp() {
       studentForm.phone = ''
       studentForm.move_in_date = ''
       studentForm.password = ''
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -393,7 +444,7 @@ export function useDormitoryApp() {
         body: JSON.stringify({ students: studentsToImport }),
       })
       notice.value = `已导入 ${studentsToImport.length} 名学生`
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -409,7 +460,7 @@ export function useDormitoryApp() {
         }),
       })
       notice.value = clear ? '已办理退宿' : '住宿已调整'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -418,7 +469,7 @@ export function useDormitoryApp() {
     await run(async () => {
       await request(`/api/students/${encodeURIComponent(student.student_id)}`, { method: 'DELETE' })
       notice.value = '学生已删除'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -430,7 +481,7 @@ export function useDormitoryApp() {
         body: JSON.stringify({ password: resetForm.password }),
       })
       notice.value = '密码已重置'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -446,7 +497,7 @@ export function useDormitoryApp() {
       notice.value = '账号已创建'
       accountForm.account = ''
       accountForm.password = ''
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -469,7 +520,7 @@ export function useDormitoryApp() {
       })
       notice.value = '账号已更新'
       accountEditForm.password = ''
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -478,7 +529,7 @@ export function useDormitoryApp() {
     await run(async () => {
       await request(`/api/accounts/${encodeURIComponent(item.account)}`, { method: 'DELETE' })
       notice.value = '账号已删除'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -492,7 +543,7 @@ export function useDormitoryApp() {
         body: JSON.stringify(billForm),
       })
       notice.value = '账单已生成'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -508,7 +559,7 @@ export function useDormitoryApp() {
         body: JSON.stringify(body),
       })
       notice.value = '账单已更新'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -529,7 +580,7 @@ export function useDormitoryApp() {
     await run(async () => {
       await request(`/api/bills/${encodeURIComponent(bill.bill_id)}`, { method: 'DELETE' })
       notice.value = '账单已删除'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -563,7 +614,7 @@ export function useDormitoryApp() {
         body: JSON.stringify(body),
       })
       notice.value = '报修单已更新'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -577,7 +628,7 @@ export function useDormitoryApp() {
         body: JSON.stringify({ ...hygieneForm, check_date: optional(hygieneForm.check_date) }),
       })
       notice.value = '卫生记录已发布'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -593,7 +644,7 @@ export function useDormitoryApp() {
       notice.value = '物品记录已登记'
       itemForm.item_name = ''
       itemForm.remark = ''
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -605,7 +656,7 @@ export function useDormitoryApp() {
         body: JSON.stringify({ status: '已归还' }),
       })
       notice.value = '物品状态已更新'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -622,7 +673,7 @@ export function useDormitoryApp() {
       visitorForm.visitor_name = ''
       visitorForm.phone = ''
       visitorForm.remark = ''
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -631,7 +682,7 @@ export function useDormitoryApp() {
     await run(async () => {
       await request(`/api/access/visitors/${encodeURIComponent(visitor.visitor_id)}/leave`, { method: 'PATCH' })
       notice.value = '访客离开已记录'
-      await loadAdminData()
+      await loadAdminContext()
     })
   }
 
@@ -641,6 +692,12 @@ export function useDormitoryApp() {
   onMounted(() => {
     if (auth.token && auth.role) {
       refresh()
+    }
+  })
+
+  watch(activeTab, (tab) => {
+    if (auth.role === 'admin') {
+      void run(() => loadAdminTab(tab))
     }
   })
 
@@ -679,6 +736,9 @@ export function useDormitoryApp() {
     statistics,
     statisticsFilters,
     students,
+    studentQuery,
+    studentQueryExecuted,
+    studentTotal,
     studentForm,
     studentHome,
     studentUnpaidCount,
@@ -709,6 +769,7 @@ export function useDormitoryApp() {
     refresh,
     refreshBills,
     refreshStatistics,
+    searchStudents,
     resetPassword,
     returnItem,
     statusClass,

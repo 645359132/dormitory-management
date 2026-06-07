@@ -31,9 +31,11 @@ def overview(_: CurrentUser = Depends(require_admin)) -> dict[str, Any]:
                 (SELECT COUNT(*) FROM Dormitory) AS room_count,
                 (SELECT ISNULL(SUM(BedTotal), 0) FROM Dormitory) AS bed_count,
                 (SELECT ISNULL(SUM(BedUsed), 0) FROM Dormitory) AS occupied_count,
+                (SELECT COUNT(*) FROM Student WHERE BuildingNo IS NULL OR RoomNo IS NULL) AS unassigned_count,
                 (SELECT COUNT(*) FROM UtilityBill WHERE PayStatus = N'未缴') AS unpaid_count,
                 (SELECT ISNULL(SUM(TotalAmount), 0) FROM UtilityBill WHERE PayStatus = N'未缴') AS unpaid_amount,
                 (SELECT COUNT(*) FROM RepairRecord WHERE Status <> N'已完成') AS open_repair_count,
+                (SELECT COUNT(*) FROM VisitorRecord WHERE Status = N'在访') AS active_visitor_count,
                 (SELECT ISNULL(AVG(CAST(Score AS FLOAT)), 0) FROM HygieneRecord) AS hygiene_average
             """
         ) or {}
@@ -98,7 +100,7 @@ def statistics(
         return {
             "vacancies": fetch_all(
                 f"""
-                SELECT BuildingNo AS building_no,
+                SELECT TOP 6 BuildingNo AS building_no,
                        RoomNo AS room_no,
                        BedTotal AS bed_total,
                        BedUsed AS bed_used,
@@ -123,7 +125,7 @@ def statistics(
             ),
             "hygiene_ranking": fetch_all(
                 f"""
-                SELECT TOP 20 BuildingNo AS building_no,
+                SELECT TOP 6 BuildingNo AS building_no,
                               RoomNo AS room_no,
                               AVG(CAST(Score AS FLOAT)) AS average_score,
                               COUNT(*) AS check_count,
@@ -137,7 +139,7 @@ def statistics(
             ),
             "bill_collection": fetch_all(
                 f"""
-                SELECT BillMonth AS bill_month,
+                SELECT TOP 6 BillMonth AS bill_month,
                        COUNT(*) AS bill_count,
                        SUM(CASE WHEN PayStatus = N'已缴' THEN 1 ELSE 0 END) AS paid_count,
                        ISNULL(SUM(TotalAmount), 0) AS total_amount

@@ -32,8 +32,11 @@ def list_students(
     q: str | None = Query(default=None),
     building_no: str | None = None,
     room_no: str | None = None,
+    residence_status: str | None = Query(default=None, pattern="^(assigned|unassigned)$"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
     _: CurrentUser = Depends(require_admin),
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """查询学生列表，支持按关键字搜索和按宿舍筛选。
 
     参数：
@@ -45,17 +48,32 @@ def list_students(
         conditions = ["1 = 1"]
         params: list[Any] = []
         if q:
-            conditions.append("(s.StudentId LIKE ? OR s.Name LIKE ? OR s.Major LIKE ? OR s.[Class] LIKE ?)")
+            conditions.append(
+                "(s.StudentId LIKE ? OR s.Name LIKE ? OR s.Major LIKE ? OR s.[Class] LIKE ? "
+                "OR s.Phone LIKE ? OR s.BuildingNo LIKE ? OR s.RoomNo LIKE ?)"
+            )
             like = f"%{q}%"
-            params.extend([like, like, like, like])
+            params.extend([like, like, like, like, like, like, like])
         if building_no:
             conditions.append("s.BuildingNo = ?")
             params.append(building_no)
         if room_no:
             conditions.append("s.RoomNo = ?")
             params.append(room_no)
+        if residence_status == "assigned":
+            conditions.append("s.BuildingNo IS NOT NULL AND s.RoomNo IS NOT NULL")
+        elif residence_status == "unassigned":
+            conditions.append("(s.BuildingNo IS NULL OR s.RoomNo IS NULL)")
 
-        return fetch_all(
+        where = " AND ".join(conditions)
+        total_row = fetch_all(
+            f"SELECT COUNT(*) AS total FROM Student AS s WHERE {where}",
+            tuple(params),
+        )
+        total = total_row[0]["total"] if total_row else 0
+        offset = (page - 1) * page_size
+
+        items = fetch_all(
             f"""
             SELECT s.StudentId AS student_id,
                    s.Name AS name,
@@ -70,11 +88,13 @@ def list_students(
             FROM Student AS s
             LEFT JOIN Dormitory AS d
                 ON d.BuildingNo = s.BuildingNo AND d.RoomNo = s.RoomNo
-            WHERE {' AND '.join(conditions)}
+            WHERE {where}
             ORDER BY s.BuildingNo, s.RoomNo, s.StudentId
+            OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
             """,
-            tuple(params),
+            tuple([*params, offset, page_size]),
         )
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
     except Exception as exc:
         raise_db(exc)
 

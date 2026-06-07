@@ -8,6 +8,29 @@ export type Role = 'admin' | 'student' | ''
 /** 管理端标签页 ID */
 export type AdminTab = 'overview' | 'residence' | 'bills' | 'maintenance' | 'access' | 'accounts'
 
+/** 管理员从总览或列表发起的具体办理事项 */
+export interface AdminActionRequest {
+  id: number
+  name: string
+}
+
+/** 服务端分页响应 */
+export interface PageResult<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
+/** 学生名单服务端查询条件 */
+export interface StudentQuery {
+  q: string
+  building_no: string
+  residence_status: string
+  page: number
+  page_size: number
+}
+
 // ========== 认证相关 ==========
 
 /** 登录响应 */
@@ -32,9 +55,11 @@ export interface Overview {
   room_count: number         // 宿舍间数
   bed_count: number          // 床位总数
   occupied_count: number     // 已入住数
+  unassigned_count: number   // 未分配宿舍学生数
   unpaid_count: number       // 未缴账单数
   unpaid_amount: number      // 未缴总额
   open_repair_count: number  // 待处理维修数
+  active_visitor_count: number // 当前在访人数
   hygiene_average: number    // 卫生平均分
 }
 
